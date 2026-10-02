@@ -1,0 +1,231 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String        @id @default(cuid())
+  name         String
+  email        String        @unique
+  passwordHash String
+  role         String        // "ADMIN" | "MANAGER" | "STAFF"
+  active       Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  purchases    Purchase[]
+  orders       Order[]
+  bills        Bill[]
+  stockLedgers StockLedger[]
+}
+
+model Company {
+  id                String     @id @default(cuid())
+  name              String     @unique
+  commissionPercent Float      @default(0) // Margin/discount given by company on purchases (%)
+  contact           String?
+  active            Boolean    @default(true)
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  products          Product[]
+  purchases         Purchase[]
+}
+
+model Product {
+  id                String         @id @default(cuid())
+  companyId         String
+  company           Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name              String
+  flavor            String
+  unit              String         // e.g. "100ml Cup", "500ml Tub", "1L Family Pack", "70ml Stick", "Cone 120ml"
+  mrp               Float
+  salePrice         Float          // Default wholesale selling price to retailer
+  purchasePrice     Float          // Purchase price from company (Restricted to ADMIN)
+  gstPercent        Float          @default(0) // Optional GST percentage (0%, 5%, 18%)
+  lowStockThreshold Int            @default(15)
+  active            Boolean        @default(true)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  purchaseItems     PurchaseItem[]
+  orderItems        OrderItem[]
+  billItems         BillItem[]
+  stockLedgers      StockLedger[]
+
+  @@index([companyId])
+  @@index([active])
+}
+
+model Purchase {
+  id                String         @id @default(cuid())
+  companyId         String
+  company           Company        @relation(fields: [companyId], references: [id])
+  invoiceNo         String
+  date              DateTime
+  subtotal          Float
+  commissionPercent Float          @default(0)
+  commissionAmount  Float          @default(0)
+  netAmount         Float
+  createdById       String
+  createdBy         User           @relation(fields: [createdById], references: [id])
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  items             PurchaseItem[]
+
+  @@index([companyId])
+  @@index([date])
+}
+
+model PurchaseItem {
+  id         String   @id @default(cuid())
+  purchaseId String
+  purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id])
+  qty        Int
+  rate       Float
+  amount     Float
+
+  @@index([purchaseId])
+  @@index([productId])
+}
+
+model Customer {
+  id             String    @id @default(cuid())
+  shopName       String
+  ownerName      String
+  phone          String
+  address        String?
+  area           String?
+  gstin          String?
+  openingBalance Float     @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  orders         Order[]
+  bills          Bill[]
+  payments       Payment[]
+
+  @@index([shopName])
+  @@index([phone])
+}
+
+model Order {
+  id           String      @id @default(cuid())
+  orderNo      String      @unique
+  customerId   String
+  customer     Customer    @relation(fields: [customerId], references: [id])
+  createdById  String
+  createdBy    User        @relation(fields: [createdById], references: [id])
+  deliveryDate DateTime
+  status       String      @default("PENDING") // PENDING, CONFIRMED, BILLED, DELIVERED, CANCELLED
+  notes        String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  items        OrderItem[]
+  bill         Bill?
+
+  @@index([customerId])
+  @@index([createdById])
+  @@index([status])
+  @@index([deliveryDate])
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  qty       Int
+  rate      Float
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+model Bill {
+  id          String     @id @default(cuid())
+  billNo      String     @unique
+  customerId  String
+  customer    Customer   @relation(fields: [customerId], references: [id])
+  orderId     String?    @unique
+  order       Order?     @relation(fields: [orderId], references: [id])
+  date        DateTime   @default(now())
+  subtotal    Float
+  discount    Float      @default(0)
+  gst         Float      @default(0)
+  roundOff    Float      @default(0)
+  total       Float
+  paidAmount  Float      @default(0)
+  paymentMode String     @default("CASH") // CASH, UPI, CREDIT, CHEQUE
+  createdById String
+  createdBy   User       @relation(fields: [createdById], references: [id])
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  items       BillItem[]
+  payments    Payment[]
+
+  @@index([customerId])
+  @@index([date])
+  @@index([createdById])
+}
+
+model BillItem {
+  id        String  @id @default(cuid())
+  billId    String
+  bill      Bill    @relation(fields: [billId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  qty       Int
+  rate      Float
+  amount    Float
+
+  @@index([billId])
+  @@index([productId])
+}
+
+model Payment {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+  billId     String?
+  bill       Bill?    @relation(fields: [billId], references: [id])
+  amount     Float
+  mode       String   // CASH, UPI, BANK_TRANSFER, CHEQUE
+  notes      String?
+  date       DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@index([customerId])
+  @@index([billId])
+  @@index([date])
+}
+
+model StockLedger {
+  id        String   @id @default(cuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+  type      String   // PURCHASE, SALE, ADJUSTMENT, CANCEL
+  qty       Int      // + for added, - for reduced
+  refType   String?  // "PURCHASE", "BILL", "MANUAL", "ORDER_CANCEL"
+  refId     String?  // e.g. billId, purchaseId, or manual note
+  notes     String?
+  date      DateTime @default(now())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@index([productId])
+  @@index([type])
+  @@index([date])
+}
